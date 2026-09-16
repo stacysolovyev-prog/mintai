@@ -220,7 +220,7 @@ function Capture({
           />
         </label>
 
-        {error && <p className="small mt12" style={{ color: "#A32E25" }}>{error}</p>}
+        {error && <p className="small mt12" style={{ color: "var(--red)" }}>{error}</p>}
 
         <button className="btn block mt16" onClick={go} disabled={busy || text.trim().length < 20}>
           {busy ? <><span className="spin" /> Writing recap…</> : "Make the recap"}

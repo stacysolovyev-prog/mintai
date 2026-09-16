@@ -6,6 +6,8 @@ import AuthView from "./AuthView";
 import { supabase } from "@/lib/supabase";
 import { list, saveProfile, type Profile, type Deck, type Quiz, type Task, type TutorSession } from "@/lib/store";
 import { ImageIcon } from "./Icons";
+import Weather from "./Weather";
+import { haptic } from "@/lib/haptics";
 
 type Stats = {
   problems: number;
@@ -49,6 +51,29 @@ export default function ProfileTab({
 }) {
   const userId = user?.id ?? null;
   const [stats, setStats] = useState<Stats | null>(null);
+
+  // The weather room. Seven taps on "Your stats" opens it. Deliberately
+  // undiscoverable: no affordance, no hint, and the run resets if you pause.
+  const [unlocked, setUnlocked] = useState(false);
+  const [showWeather, setShowWeather] = useState(false);
+  const taps = useRef<{ n: number; last: number }>({ n: 0, last: 0 });
+
+  const secretTap = () => {
+    const now = Date.now();
+    // More than a second between taps and it is not a deliberate run.
+    taps.current.n = now - taps.current.last > 1000 ? 1 : taps.current.n + 1;
+    taps.current.last = now;
+
+    if (taps.current.n >= 7 && !unlocked) {
+      taps.current.n = 0;
+      setUnlocked(true);
+      haptic("success");
+    } else if (taps.current.n >= 4) {
+      // A faint tick from the fourth tap on, so a run feels like it is going
+      // somewhere once you are already most of the way there.
+      haptic("tap");
+    }
+  };
   const [name, setName] = useState("");
   const [grade, setGrade] = useState("");
   const [saving, setSaving] = useState(false);
@@ -126,7 +151,7 @@ export default function ProfileTab({
                 {profile?.avatar_url ? (
                   <img src={profile.avatar_url} alt="" />
                 ) : (
-                  <span style={{ fontSize: 28, fontWeight: 700, color: "#14977A" }}>{initials}</span>
+                  <span style={{ fontSize: 28, fontWeight: 700, color: "var(--mint)" }}>{initials}</span>
                 )}
               </div>
               <div className="grow col" style={{ gap: 3 }}>
@@ -143,7 +168,7 @@ export default function ProfileTab({
                 </button>
               </div>
             </div>
-            {uploadErr && <p className="small mt12" style={{ color: "#A32E25" }}>{uploadErr}</p>}
+            {uploadErr && <p className="small mt12" style={{ color: "var(--red)" }}>{uploadErr}</p>}
             <input
               ref={fileRef} type="file" accept="image/*" hidden
               onChange={(e) => { upload(e.target.files?.[0]); e.target.value = ""; }}
@@ -176,7 +201,15 @@ export default function ProfileTab({
         </div>
       )}
 
-      <h3 className="mt24" style={{ fontSize: 15.5 }}>Your stats</h3>
+      <h3 className="mt24" style={{ fontSize: 15.5 }} onClick={secretTap}>Your stats</h3>
+
+      {unlocked && (
+        <button className="btn secondary block mt12 wx-open" onClick={() => { haptic("tap"); setShowWeather(true); }}>
+          Weather
+        </button>
+      )}
+
+      {showWeather && <Weather onClose={() => setShowWeather(false)} />}
 
       <div className="stats mt12">
         <div className="stat">

@@ -10,6 +10,7 @@ import Wordmark from "@/components/Wordmark";
 import SetupBanner from "@/components/SetupBanner";
 import { ScanIcon, ChatIcon, VoiceIcon, StudyIcon, YouIcon } from "@/components/Icons";
 import { useAuth } from "@/lib/useAuth";
+import { haptic } from "@/lib/haptics";
 
 const TABS = [
   { id: "scan",  label: "Scan",  sub: "Photo of the problem", Icon: ScanIcon },
@@ -69,7 +70,10 @@ export default function Page() {
           <button
             key={id}
             className={tab === id ? "on" : ""}
-            onClick={() => setTab(id)}
+            onClick={() => {
+              if (id !== tab) haptic("tap");
+              setTab(id);
+            }}
             aria-current={tab === id ? "page" : undefined}
           >
             <Icon />

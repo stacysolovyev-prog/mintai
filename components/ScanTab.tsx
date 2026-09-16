@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Tutor from "./Tutor";
 import { CameraIcon, ImageIcon, CloseIcon } from "./Icons";
-import Mascot from "./Mascot";
+import { haptic } from "@/lib/haptics";
 
-/** Downscale before upload — free vision models choke on full-res phone photos. */
+/** Downscale before upload — vision models are slower and dearer on full-res phone photos. */
 async function shrink(src: string, max = 1400): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
@@ -30,10 +31,14 @@ export default function ScanTab({ userId }: { userId: string | null }) {
   const [shot, setShot] = useState<string | null>(null);
   const [live, setLive] = useState(false);
   const [camError, setCamError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // The viewfinder renders through a portal, which needs a DOM to portal into.
+  useEffect(() => setMounted(true), []);
 
   const stop = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -43,7 +48,28 @@ export default function ScanTab({ userId }: { userId: string | null }) {
 
   useEffect(() => stop, [stop]);
 
+  // Nothing behind the viewfinder should scroll or rubber-band while it is up.
+  useEffect(() => {
+    if (!live) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [live]);
+
+  // Back gesture and Escape should close the camera, not leave the app.
+  useEffect(() => {
+    if (!live) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") stop();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [live, stop]);
+
   const openCamera = async () => {
+    haptic("tap");
     setCamError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -73,7 +99,8 @@ export default function ScanTab({ userId }: { userId: string | null }) {
 
   const capture = async () => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !video.videoWidth) return;
+    haptic("send");
     const canvas = document.createElement("canvas");
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
@@ -90,10 +117,40 @@ export default function ScanTab({ userId }: { userId: string | null }) {
   };
 
   const reset = () => {
+    haptic("tap");
     stop();
     setShot(null);
     setCamError(null);
   };
+
+  /**
+   * The viewfinder. Portalled to <body> and fixed to the viewport so it covers
+   * the whole screen — the tab bar and the header included — the way a camera
+   * does in every native app.
+   */
+  const viewfinder =
+    live && mounted
+      ? createPortal(
+          <div className="viewfinder" role="dialog" aria-label="Camera" aria-modal="true">
+            <video ref={videoRef} playsInline muted autoPlay />
+
+            <button className="vf-close" onClick={stop} aria-label="Close camera">
+              <CloseIcon />
+            </button>
+
+            {/* Corner marks, so it is obvious what will end up in the shot. */}
+            <div className="vf-frame" aria-hidden="true">
+              <i /><i /><i /><i />
+            </div>
+
+            <div className="vf-bar">
+              <p className="vf-hint">Fill the frame with the question</p>
+              <button className="shutter" onClick={capture} aria-label="Take photo" />
+            </div>
+          </div>,
+          document.body,
+        )
+      : null;
 
   if (shot) {
     return (
@@ -113,49 +170,45 @@ export default function ScanTab({ userId }: { userId: string | null }) {
 
   return (
     <>
-      {live ? (
-        <>
-          <div className="shot">
-            <video ref={videoRef} playsInline muted autoPlay />
-            <button className="shutter" onClick={capture} aria-label="Take photo" />
-          </div>
-          <button className="btn ghost block mt12" onClick={stop}>
-            Cancel
-          </button>
-        </>
-      ) : (
-        <div className="fill-center">
-          <div className="card center">
-            <Mascot mood="idle" size={92} />
-            <h2 className="mt12" style={{ fontSize: 17 }}>Scan a problem</h2>
-            <p className="small muted mt8" style={{ maxWidth: 300, margin: "8px auto 0" }}>
-              Point at the question. You&apos;ll get the questions that get you there — not the answer.
-            </p>
-          </div>
+      {viewfinder}
 
-          {camError && <div className="banner mt12">{camError}</div>}
-
-          <button className="btn block mt16" onClick={openCamera}>
-            <CameraIcon /> Open camera
-          </button>
-
-          <button className="btn secondary block mt12" onClick={() => fileRef.current?.click()}>
-            <ImageIcon /> Upload a photo
-          </button>
-
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            hidden
-            onChange={(e) => {
-              pick(e.target.files?.[0]);
-              e.target.value = "";
-            }}
-          />
+      <div className="fill-center">
+        <div className="hero">
+          <h2>Scan a problem</h2>
+          <p>
+            Point at the question. You&apos;ll get the questions that get you there — not the
+            answer.
+          </p>
         </div>
-      )}
+
+        {camError && <div className="banner mt12">{camError}</div>}
+
+        <button className="btn block mt16" onClick={openCamera}>
+          <CameraIcon /> Open camera
+        </button>
+
+        <button
+          className="btn secondary block mt12"
+          onClick={() => {
+            haptic("tap");
+            fileRef.current?.click();
+          }}
+        >
+          <ImageIcon /> Upload a photo
+        </button>
+
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          hidden
+          onChange={(e) => {
+            pick(e.target.files?.[0]);
+            e.target.value = "";
+          }}
+        />
+      </div>
     </>
   );
 }

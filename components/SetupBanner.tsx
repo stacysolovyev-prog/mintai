@@ -38,8 +38,8 @@ export default function SetupBanner() {
         <strong>Tutoring is switched off on this deployment.</strong>
         <p className="mt8">
           {bad === "missing"
-            ? "The OPENROUTER_API_KEY environment variable isn't set, so Scan, Chat and Voice can't reach a model."
-            : "OPENROUTER_API_KEY is set but doesn't look like an OpenRouter key — they start with sk-or-."}
+            ? "No model API key is set, so Scan, Chat and Voice can't reach a model. Set OPENROUTER_API_KEY, or NVIDIA_API_KEY with a model chain."
+            : "A key is set but doesn't look right — OpenRouter keys start with sk-or-, NVIDIA keys with nvapi-."}
         </p>
         <p className="mt8">
           Add it in Vercel → your project → Settings → Environment Variables, then

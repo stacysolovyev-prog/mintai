@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { list, save, remove, type Quiz, type Question } from "@/lib/store";
 import { postJson } from "@/lib/api";
 import { PlusIcon, TrashIcon, CloseIcon, BackIcon } from "./Icons";
-import Mascot from "./Mascot";
 
 export default function QuizView({ userId }: { userId: string | null }) {
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
@@ -159,7 +158,7 @@ function MakeSheet({
           <span className="tiny muted">questions</span>
         </div>
 
-        {error && <p className="small mt12" style={{ color: "#A32E25" }}>{error}</p>}
+        {error && <p className="small mt12" style={{ color: "var(--red)" }}>{error}</p>}
 
         <button className="btn block mt20" onClick={go} disabled={busy || notes.trim().length < 20}>
           {busy ? <><span className="spin" /> Writing…</> : "Make it"}
@@ -210,8 +209,7 @@ function Take({
     return (
       <>
         <div className="card center">
-          <Mascot mood={pct >= 70 ? "happy" : "think"} size={92} />
-          <h2 className="mt12" style={{ fontSize: 26 }}>{score} / {quiz.questions.length}</h2>
+          <h2 className="score" style={{ fontSize: 34 }}>{score} / {quiz.questions.length}</h2>
           <p className="small muted mt8">
             {pct >= 90 ? "You know this one." :
              pct >= 70 ? "Solid. Worth another pass on the misses." :

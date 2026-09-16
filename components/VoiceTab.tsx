@@ -260,7 +260,7 @@ export default function VoiceTab({ userId }: { userId: string | null }) {
               : `Device voice${fallbackWhy ? ` — ${fallbackWhy}` : ""}`}
           </p>
         )}
-        {error && <p className="small mt8" style={{ color: "#A32E25" }}>{error}</p>}
+        {error && <p className="small mt8" style={{ color: "var(--red)" }}>{error}</p>}
 
         {ttsVoices.length > 1 && (
           <label className="field mt20" style={{ textAlign: "left" }}>
@@ -311,7 +311,7 @@ export default function VoiceTab({ userId }: { userId: string | null }) {
             type="checkbox"
             checked={handsFree}
             onChange={(e) => setHandsFree(e.target.checked)}
-            style={{ width: 17, height: 17, accentColor: "#24B48F" }}
+            style={{ width: 17, height: 17, accentColor: "var(--mint)" }}
           />
           <span className="muted">Keep listening between replies</span>
         </label>

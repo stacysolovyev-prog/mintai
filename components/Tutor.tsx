@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Markdown from "./Markdown";
 import { SendIcon, VideoIcon, PlayIcon } from "./Icons";
 import { save, type ChatMsg, type TutorSession } from "@/lib/store";
-import { postJson } from "@/lib/api";
-import Mascot from "./Mascot";
+import { postJson, postStream } from "@/lib/api";
+import { haptic } from "@/lib/haptics";
 
 type Video = { title: string; channel: string; why: string; url: string; thumb: string | null };
 
@@ -14,6 +14,10 @@ export type TutorHandle = { start: (image: string, caption?: string) => void };
 /**
  * The tutoring conversation. Scan and Chat both mount this — Scan feeds it a
  * photo, Chat feeds it text. Everything about staying unstuck lives here.
+ *
+ * The reply streams in. That is the single biggest thing that makes this feel
+ * fast: the first words land in well under a second, so there is never a blank
+ * bubble to sit and watch.
  */
 export default function Tutor({
   source,
@@ -29,6 +33,7 @@ export default function Tutor({
   placeholder?: string;
 }) {
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
+  const [live, setLive] = useState<string | null>(null);
   const [mode, setMode] = useState<"guide" | "explain">("guide");
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -42,10 +47,15 @@ export default function Tutor({
   const pending = useRef<{ history: ChatMsg[]; image: string | null } | null>(null);
   const sessionId = useRef<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const abort = useRef<AbortController | null>(null);
+
+  // Drop any in-flight stream when this unmounts, so a half-finished reply
+  // cannot call setState on a component that is gone.
+  useEffect(() => () => abort.current?.abort(), []);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [msgs, busy, videos]);
+  }, [msgs, live, busy, videos]);
 
   const persist = useCallback(
     async (all: ChatMsg[], subject: string | null, problem: string | null) => {
@@ -69,38 +79,80 @@ export default function Tutor({
   const run = useCallback(
     async (history: ChatMsg[], image: string | null) => {
       pending.current = { history, image };
+      abort.current?.abort();
+      const control = new AbortController();
+      abort.current = control;
+
       setBusy(true);
       setError(null);
+      setLive("");
+
+      let reply = "";
+      let subject: string | null = null;
+      let problem: string | null = null;
+      let failed: string | null = null;
+      let landed = false;
 
       try {
-        const data = await postJson<{
-          reply: string;
-          subject?: string | null;
-          problem?: string | null;
-        }>("/api/tutor", {
-          messages: history.map(({ role, content }) => ({ role, content })),
-          mode,
-          image,
-        });
+        const events = postStream(
+          "/api/tutor",
+          {
+            messages: history.map(({ role, content }) => ({ role, content })),
+            mode,
+            image,
+          },
+          control.signal,
+        );
 
-        // A scanned photo comes back as readable text — fold it into the first
-        // user turn so follow-ups have context without re-sending the image.
-        let next = history;
-        if (image && data.problem) {
-          next = [{ role: "user", content: data.problem, image }, ...history];
-          setTopic(data.problem);
-          onProblem?.({ subject: data.subject ?? null, problem: data.problem });
+        for await (const ev of events) {
+          if (ev.t === "problem") {
+            // A scanned photo comes back readable — fold it into the first
+            // user turn so follow-ups have context without re-sending the image.
+            subject = ev.subject || null;
+            problem = ev.problem || null;
+            if (problem) {
+              setTopic(problem);
+              onProblem?.({ subject, problem });
+            }
+          } else if (ev.t === "d") {
+            if (!landed) {
+              landed = true;
+              // The first words of the answer arriving is the moment worth
+              // feeling, the same as a text landing.
+              haptic("success");
+            }
+            reply += ev.v;
+            setLive(reply);
+          } else if (ev.t === "error") {
+            failed = ev.error;
+          }
         }
-
-        const all: ChatMsg[] = [...next, { role: "assistant", content: data.reply }];
-        setMsgs(all);
-        pending.current = null;
-        void persist(all, data.subject ?? null, data.problem ?? null);
       } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setBusy(false);
+        failed = (e as Error).message;
       }
+
+      if (control.signal.aborted) return;
+
+      // A stream that broke partway still has real text in it. Keep what
+      // arrived, show the problem underneath it, and let Retry replace it.
+      const finished = reply.trim();
+
+      if (finished) {
+        const base: ChatMsg[] =
+          image && problem ? [{ role: "user", content: problem, image }, ...history] : history;
+        const all: ChatMsg[] = [...base, { role: "assistant", content: finished }];
+        setMsgs(all);
+        pending.current = failed ? pending.current : null;
+        void persist(all, subject, problem);
+      }
+
+      if (failed) {
+        setError(failed);
+        haptic("error");
+      }
+
+      setLive(null);
+      setBusy(false);
     },
     [mode, onProblem, persist],
   );
@@ -118,6 +170,7 @@ export default function Tutor({
   const send = () => {
     const text = draft.trim();
     if (!text || busy) return;
+    haptic("send");
     setDraft("");
     if (!topic) setTopic(text);
     const history: ChatMsg[] = [...msgs, { role: "user", content: text }];
@@ -128,12 +181,14 @@ export default function Tutor({
   const retry = () => {
     const p = pending.current;
     if (!p) return;
+    haptic("tap");
     void run(p.history, p.image);
   };
 
   const findVideos = async () => {
     const q = topic || msgs.find((m) => m.role === "user")?.content;
     if (!q) return;
+    haptic("tap");
     setVidBusy(true);
     try {
       const data = await postJson<{ videos?: Video[] }>("/api/videos", { topic: q });
@@ -145,15 +200,32 @@ export default function Tutor({
     }
   };
 
-  const started = msgs.length > 0;
+  const started = msgs.length > 0 || live !== null;
+
+  // One list for what is on screen: the settled messages, plus the reply
+  // currently arriving. An empty streaming message renders as the typing dots.
+  const thread: ChatMsg[] =
+    live !== null ? [...msgs, { role: "assistant", content: live }] : msgs;
 
   return (
-    <div className="col" style={{ gap: 14 }}>
+    <div className="col tutor" style={{ gap: 14 }}>
       <div className="seg">
-        <button className={mode === "guide" ? "on" : ""} onClick={() => setMode("guide")}>
+        <button
+          className={mode === "guide" ? "on" : ""}
+          onClick={() => {
+            haptic("tap");
+            setMode("guide");
+          }}
+        >
           Guide me
         </button>
-        <button className={mode === "explain" ? "on" : ""} onClick={() => setMode("explain")}>
+        <button
+          className={mode === "explain" ? "on" : ""}
+          onClick={() => {
+            haptic("tap");
+            setMode("explain");
+          }}
+        >
           Explain it
         </button>
       </div>
@@ -166,31 +238,34 @@ export default function Tutor({
 
       {!started && (
         <div className="empty">
-          <Mascot mood="idle" size={92} />
-          <h3 className="mt12">{source === "scan" ? "Take a photo of the problem" : "Type the problem"}</h3>
+          <h3>{source === "scan" ? "Take a photo of the problem" : "Type the problem"}</h3>
           <p>You get the questions, not the answers.</p>
         </div>
       )}
 
       {started && (
         <div className="thread">
-          {msgs.map((m, i) => (
+          {/* The streaming reply is rendered as the LAST ITEM OF THE SAME LIST,
+              not as a sibling after it. When the stream finishes and the real
+              message takes its place, it lands on the same key at the same
+              index, so React updates it in place. Rendered as a sibling it
+              unmounts and a fresh bubble mounts, which replays the entry
+              animation and makes the finished answer visibly flicker. */}
+          {thread.map((m, i) => (
             <div key={i} className={`msg ${m.role === "user" ? "me" : "bot"}`}>
               {m.image && (
                 <img src={m.image} alt="The problem you scanned" style={{ marginBottom: m.content ? 9 : 0 }} />
               )}
-              {m.content &&
-                (m.role === "assistant" ? <Markdown text={m.content} /> : <p>{m.content}</p>)}
+              {m.role === "assistant" && !m.content ? (
+                <span className="dots">
+                  <i /><i /><i />
+                </span>
+              ) : (
+                m.content &&
+                (m.role === "assistant" ? <Markdown text={m.content} /> : <p>{m.content}</p>)
+              )}
             </div>
           ))}
-
-          {busy && (
-            <div className="msg bot">
-              <span className="dots">
-                <i /><i /><i />
-              </span>
-            </div>
-          )}
 
           {error && (
             <div className="msg err">
@@ -214,6 +289,7 @@ export default function Tutor({
           <button
             className="btn sm ghost"
             onClick={() => {
+              haptic("tap");
               setDraft("I'm still stuck. Ask me something smaller.");
             }}
           >
@@ -243,7 +319,7 @@ export default function Tutor({
         </div>
       )}
 
-      <div className="row" style={{ gap: 9, alignItems: "flex-end" }}>
+      <div className="composer">
         <textarea
           className="textarea grow"
           rows={1}
@@ -262,11 +338,10 @@ export default function Tutor({
           }}
         />
         <button
-          className="btn"
+          className="btn send"
           onClick={send}
           disabled={busy || !draft.trim()}
           aria-label="Send"
-          style={{ padding: 13, flex: "none" }}
         >
           <SendIcon />
         </button>

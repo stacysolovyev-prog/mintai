@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { list, save, remove, type Task } from "@/lib/store";
 import { CheckIcon, PlusIcon, TrashIcon, CloseIcon } from "./Icons";
-import Mascot from "./Mascot";
 
 const DAYS = ["S", "M", "T", "W", "T", "F", "S"];
 const MONTHS = ["January", "February", "March", "April", "May", "June",
@@ -158,8 +157,7 @@ export default function TasksView({ userId }: { userId: string | null }) {
           <p className="small muted center">Loading…</p>
         ) : shown.length === 0 ? (
           <div className="empty">
-            <Mascot mood="happy" size={76} />
-            <h3 className="mt12">Nothing due</h3>
+            <h3>Nothing due</h3>
             <p>Add what you need to get done.</p>
           </div>
         ) : (

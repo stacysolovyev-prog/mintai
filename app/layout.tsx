@@ -20,7 +20,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" style={{ colorScheme: "light" }}>
       <head>
         {/* The typeface is self-hosted from /public/fonts — see globals.css.
             Preloading the latin subset keeps the first paint on-brand. */}

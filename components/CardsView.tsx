@@ -143,7 +143,7 @@ function MakeSheet({
           <span className="tiny muted">cards</span>
         </div>
 
-        {error && <p className="small mt12" style={{ color: "#A32E25" }}>{error}</p>}
+        {error && <p className="small mt12" style={{ color: "var(--red)" }}>{error}</p>}
 
         <button className="btn block mt20" onClick={go} disabled={busy || notes.trim().length < 20}>
           {busy ? <><span className="spin" /> Making…</> : "Make them"}
